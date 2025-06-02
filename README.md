@@ -4,25 +4,39 @@ A Python script that uses Deepgram's API to transcribe MP4 video files and gener
 
 ## Features
 
-- Transcribe MP4 video files using Deepgram's speech-to-text API
-- Output formats: VTT, SRT, TXT, JSON
-- Speaker diarization (identifies different speakers)
-- Smart formatting with punctuation
-- Configurable models and languages
-- Error handling and progress feedback
+- **Efficient Audio Extraction**: Automatically extracts audio from video files using FFmpeg with M4A compression
+- **Multiple Input Formats**: Supports MP4, MOV, AVI, MKV, and direct audio files (WAV, MP3, M4A, etc.)
+- **Highly Optimized**: Converts to compressed M4A format (typically 95%+ size reduction) for faster uploads
+- **Multiple Output Formats**: VTT, SRT, TXT, JSON
+- **Speaker Diarization**: Identifies different speakers
+- **Smart Formatting**: Automatic punctuation and formatting
+- **Configurable Options**: Different models and languages
+- **Error Handling**: Comprehensive error handling and progress feedback
 
 ## Installation
 
-1. Install dependencies:
+1. Install FFmpeg (required for video processing):
+```bash
+# macOS
+brew install ffmpeg
+
+# Ubuntu/Debian
+sudo apt-get install ffmpeg
+
+# Windows
+# Download from https://ffmpeg.org/download.html
+```
+
+2. Install Python dependencies:
 ```bash
 pip install -r requirements.txt
 ```
 
-2. Get a Deepgram API key:
+3. Get a Deepgram API key:
    - Sign up at [Deepgram](https://console.deepgram.com/)
    - Create an API key from your dashboard
 
-3. Set your API key (choose one method):
+4. Set your API key (choose one method):
    - Environment variable: `export DEEPGRAM_API_KEY=your_api_key_here`
    - Create a `.env` file: `DEEPGRAM_API_KEY=your_api_key_here`
    - Pass it as a command line argument: `--api-key your_api_key_here`

@@ -17,6 +17,8 @@ import os
 import sys
 import json
 import argparse
+import tempfile
+import subprocess
 from pathlib import Path
 from datetime import datetime, timedelta
 from typing import Optional
@@ -46,6 +48,53 @@ class VideoTranscriber:
         
         self.client = DeepgramClient(self.api_key)
     
+    def extract_audio(self, video_path: str, output_path: str = None) -> str:
+        """Extract audio from video file using ffmpeg."""
+        video_path = Path(video_path)
+        
+        if output_path is None:
+            # Create temporary file for audio (M4A format is much more efficient)
+            temp_fd, output_path = tempfile.mkstemp(suffix='.m4a', prefix='audio_')
+            os.close(temp_fd)  # Close the file descriptor, we just need the path
+        
+        try:
+            # Check if ffmpeg is available
+            subprocess.run(['ffmpeg', '-version'], capture_output=True, check=True)
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            raise RuntimeError(
+                "ffmpeg is required but not found. Install with: brew install ffmpeg (macOS) "
+                "or apt-get install ffmpeg (Linux) or download from https://ffmpeg.org"
+            )
+        
+        print(f"Extracting audio from: {video_path.name}")
+        
+        # Extract audio using ffmpeg with AAC compression (M4A)
+        cmd = [
+            'ffmpeg', '-i', str(video_path),
+            '-vn',  # No video
+            '-acodec', 'aac',  # AAC codec (much more efficient than PCM)
+            '-b:a', '64k',  # 64kbps bitrate (good quality for speech)
+            '-ar', '16000',  # 16kHz sample rate (optimal for speech recognition)
+            '-ac', '1',  # Mono channel
+            '-y',  # Overwrite output file
+            output_path
+        ]
+        
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+            
+            # Show file size comparison
+            original_size = video_path.stat().st_size
+            audio_size = Path(output_path).stat().st_size
+            compression_ratio = (1 - audio_size / original_size) * 100
+            
+            print(f"Audio extracted to: {output_path}")
+            print(f"Size reduction: {original_size / 1024 / 1024:.1f}MB → {audio_size / 1024 / 1024:.1f}MB ({compression_ratio:.1f}% smaller)")
+            
+            return output_path
+        except subprocess.CalledProcessError as e:
+            raise RuntimeError(f"Audio extraction failed: {e.stderr}")
+    
     def transcribe_file(self, file_path: str, **options) -> dict:
         """Transcribe a video file using Deepgram API."""
         file_path = Path(file_path)
@@ -54,33 +103,75 @@ class VideoTranscriber:
             raise FileNotFoundError(f"File not found: {file_path}")
         
         print(f"Transcribing: {file_path.name}")
-        print("Please wait, this may take a few minutes...")
         
-        # Default options for transcription
-        transcription_options = PrerecordedOptions(
-            model="nova-2",
-            smart_format=True,
-            utterances=True,
-            punctuate=True,
-            diarize=True,
-            language="en-US",
-            **options
-        )
+        # Check if this is a video file that needs audio extraction
+        video_extensions = {'.mp4', '.mov', '.avi', '.mkv', '.m4v', '.webm', '.flv'}
+        audio_extensions = {'.wav', '.mp3', '.m4a', '.aac', '.ogg', '.flac'}
         
-        # Read the file
-        with open(file_path, "rb") as file:
-            buffer_data = file.read()
+        file_extension = file_path.suffix.lower()
+        audio_file_path = None
+        temp_audio_file = None
         
-        payload: FileSource = {
-            "buffer": buffer_data,
-        }
-        
-        # Make the API call
-        response = self.client.listen.prerecorded.v("1").transcribe_file(
-            payload, transcription_options
-        )
-        
-        return response
+        try:
+            if file_extension in video_extensions:
+                # Extract audio from video
+                temp_audio_file = self.extract_audio(str(file_path))
+                audio_file_path = temp_audio_file
+            elif file_extension in audio_extensions:
+                # Use audio file directly
+                audio_file_path = str(file_path)
+            else:
+                # Try to process as-is (might be audio in unsupported container)
+                audio_file_path = str(file_path)
+                print(f"Warning: Unknown file type {file_extension}, attempting to process as audio...")
+            
+            print("Sending audio to Deepgram API...")
+            print("Please wait, this may take a few minutes...")
+            
+            # Default options for transcription
+            default_options = {
+                "model": "nova-2",
+                "smart_format": True,
+                "utterances": True,
+                "punctuate": True,
+                "diarize": True,
+                "language": "en-US"
+            }
+            
+            # Override defaults with user options
+            default_options.update(options)
+            
+            transcription_options = PrerecordedOptions(**default_options)
+            
+            # Read the audio file
+            with open(audio_file_path, "rb") as file:
+                buffer_data = file.read()
+            
+            payload: FileSource = {
+                "buffer": buffer_data,
+            }
+            
+            # Make the API call
+            response = self.client.listen.rest.v("1").transcribe_file(
+                payload, transcription_options
+            )
+            
+            # Convert response to dictionary if it's not already
+            if hasattr(response, 'to_dict'):
+                return response.to_dict()
+            elif hasattr(response, '__dict__'):
+                return response.__dict__
+            else:
+                return response
+            
+        finally:
+            # Clean up temporary audio file
+            if temp_audio_file and os.path.exists(temp_audio_file):
+                try:
+                    os.unlink(temp_audio_file)
+                    print(f"Cleaned up temporary audio file: {temp_audio_file}")
+                except OSError:
+                    pass  # Ignore cleanup errors
     
     def format_timestamp(self, seconds: float) -> str:
         """Convert seconds to VTT/SRT timestamp format."""
